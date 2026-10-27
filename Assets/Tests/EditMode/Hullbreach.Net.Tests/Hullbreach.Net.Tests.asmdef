@@ -3,6 +3,7 @@
     "rootNamespace": "Hullbreach.Net.Tests",
     "references": [
         "Hullbreach.Net",
+        "Hullbreach.NetCode.Entities",
         "Hullbreach.Core",
         "Hullbreach.Match",
         "Hullbreach.Platform",
@@ -10,6 +11,10 @@
         "Hullbreach.World",
         "Hullbreach.Structure",
         "Unity.Mathematics",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.NetCode",
+        "Unity.Networking.Transport",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

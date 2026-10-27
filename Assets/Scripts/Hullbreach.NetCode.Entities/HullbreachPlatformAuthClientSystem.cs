@@ -57,7 +57,6 @@ namespace Hullbreach.NetCode.Entities
     {
         EntityQuery _helloPendingQuery;
         EntityQuery _admissionQuery;
-        bool _wasConnected;
 
         protected override void OnCreate()
         {
@@ -78,10 +77,6 @@ namespace Hullbreach.NetCode.Entities
         protected override void OnUpdate()
         {
             bool thin = World.IsThinClient();
-            bool connected = SystemAPI.HasSingleton<NetworkId>();
-            if (!thin && _wasConnected && !connected) HullbreachPlatformAdmission.Clear();
-            _wasConnected = connected;
-
             SendHello(thin);
             ReceiveAdmission(thin);
         }
@@ -91,6 +86,8 @@ namespace Hullbreach.NetCode.Entities
             using var connections = _helloPendingQuery.ToEntityArray(Allocator.Temp);
             foreach (Entity connection in connections)
             {
+                // keep a rejection visible after disconnect; clear it for a new connection.
+                if (!thin) HullbreachPlatformAdmission.Clear();
                 EntityManager.AddComponent<HullbreachPlatformHelloSent>(connection);
                 var hello = new HullbreachPlatformHelloRpc();
                 bool signedIn = !thin && PlatformSession.IsSignedIn;

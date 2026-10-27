@@ -51,12 +51,49 @@ namespace Hullbreach.NetCode.Entities
                 return false;
             }
 
+            if (!TryPrepareLanClient(client, out error))
+            {
+                Debug.LogWarning($"Hullbreach LAN: join refused: {error}");
+                return false;
+            }
+
             // A validated numeric address cannot fail NetworkEndpoint parsing.
             NetworkEndpoint.TryParse(lan.Address, lan.Port, out NetworkEndpoint endpoint);
             Request(client, new NetworkStreamRequestConnect { Endpoint = endpoint });
             Debug.Log($"Hullbreach LAN: joining {lan}, loading {DirectLaunchPlan.GameScene}.");
             LoadMatch();
             return true;
+        }
+
+        // the lobby has an idle server world, so netcode initially gives its client an ipc driver.
+        // lan joining needs udp to reach a server in another process or on another computer.
+        // frob:doc docs/netcode.md#lan-host-and-join-from-the-lobby
+        public static bool TryPrepareLanClient(World client, out string error)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            error = "LAN joining is available in the desktop game.";
+            return false;
+#else
+            client.EntityManager.CompleteAllTrackedJobs();
+            using var connections = client.EntityManager.CreateEntityQuery(typeof(NetworkStreamConnection));
+            using var pending = client.EntityManager.CreateEntityQuery(typeof(NetworkStreamRequestConnect));
+            if (!connections.IsEmptyIgnoreFilter || !pending.IsEmptyIgnoreFilter)
+            {
+                error = "A connection is already active or starting. Restart the game before joining another LAN match.";
+                return false;
+            }
+
+            using var drivers = client.EntityManager.CreateEntityQuery(typeof(NetworkStreamDriver));
+            using var debug = client.EntityManager.CreateEntityQuery(typeof(NetDebug));
+            var driver = drivers.GetSingleton<NetworkStreamDriver>();
+            var store = new NetworkDriverStore();
+            using var settings = DefaultDriverBuilder.GetNetworkClientSettings();
+            DefaultDriverBuilder.RegisterClientUdpDriver(client, ref store, debug.GetSingleton<NetDebug>(), settings);
+            driver.ResetDriverStore(client.Unmanaged, ref store);
+            Debug.Log("Hullbreach LAN: client transport set to UDP.");
+            error = null;
+            return true;
+#endif
         }
 
         static void Request<T>(World world, T request) where T : unmanaged, IComponentData

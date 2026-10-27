@@ -14,6 +14,12 @@ namespace Hullbreach.Platform
         // frob:doc docs/platform-link.md#hullbreachplatform-module-reference
         public const string SessionPath = "/api/v1/auth/session";
 
+        // frob:doc docs/platform-link.md#remembered-session
+        public const string ProfilePath = "/api/v1/me";
+
+        // frob:doc docs/platform-link.md#sign-in-screen
+        public const string LogoutPath = "/api/v1/auth/logout";
+
         // frob:doc docs/platform-link.md#reporting-a-finished-match
         public const string MatchesPath = "/api/v1/matches";
 
@@ -92,6 +98,69 @@ namespace Hullbreach.Platform
                 if (outcome.Status == SessionStatus.Unreachable || outcome.Status == SessionStatus.Failed)
                     _log.Warning($"Hullbreach platform: session check {outcome.Status} ({outcome.Message}).");
                 onComplete(outcome);
+            });
+        }
+
+        // clients check their own profile; only game servers use the server-key endpoint.
+        // frob:doc docs/platform-link.md#remembered-session
+        public void RestoreSession(string token, Action<LoginOutcome> onComplete)
+        {
+            if (onComplete == null) throw new ArgumentNullException(nameof(onComplete));
+            if (string.IsNullOrEmpty(token))
+            {
+                onComplete(new LoginOutcome(LoginStatus.InvalidCredentials, null, null,
+                    "Your saved session expired. Sign in again."));
+                return;
+            }
+
+            var headers = new[] { new KeyValuePair<string, string>("Authorization", "Bearer " + token) };
+            var request = new PlatformHttpRequest(PlatformHttpMethod.Get, _config.BaseUrl + ProfilePath,
+                null, headers, _config.TimeoutSeconds);
+            _http.Send(request, response =>
+            {
+                if (response.IsTransportFailure)
+                {
+                    onComplete(new LoginOutcome(LoginStatus.Unreachable, null, null,
+                        "Cannot restore your saved session right now. Sign in or play offline."));
+                    return;
+                }
+                if (response.StatusCode == 200 && PlatformJson.TryParseObject(response.Body, out var profile))
+                {
+                    string userId = PlatformJson.GetString(profile, "id");
+                    string username = PlatformJson.GetString(profile, "username");
+                    if (!string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(username))
+                    {
+                        onComplete(new LoginOutcome(LoginStatus.Success, token, username, "Session restored."));
+                        return;
+                    }
+                }
+                bool expired = response.StatusCode == 401;
+                onComplete(new LoginOutcome(expired ? LoginStatus.InvalidCredentials : LoginStatus.Failed,
+                    null, null, expired ? "Your saved session expired. Sign in again."
+                        : "Cannot restore your saved session right now. Sign in or play offline."));
+            });
+        }
+
+        // revoke only this session; local sign-out is handled by the screen model.
+        // frob:doc docs/platform-link.md#sign-in-screen
+        public void Logout(string token, Action<bool> onComplete)
+        {
+            if (onComplete == null) throw new ArgumentNullException(nameof(onComplete));
+            if (string.IsNullOrEmpty(token))
+            {
+                onComplete(true);
+                return;
+            }
+
+            var headers = new[] { new KeyValuePair<string, string>("Authorization", "Bearer " + token) };
+            var request = new PlatformHttpRequest(PlatformHttpMethod.Post, _config.BaseUrl + LogoutPath,
+                null, headers, _config.TimeoutSeconds);
+            _http.Send(request, response =>
+            {
+                bool revoked = !response.IsTransportFailure &&
+                    (response.StatusCode == 204 || response.StatusCode == 401);
+                if (!revoked) _log.Warning("Hullbreach platform: could not revoke the signed-out session.");
+                onComplete(revoked);
             });
         }
 
