@@ -38,6 +38,7 @@ namespace Hullbreach.NetCode.Entities
         [SerializeField] float cameraSmoothing = 6f;
 
         GameObject _hover;
+        Sprite _hoverSprite;
         int _hoverKey;
         bool _hasHover;
         bool _hoverValid;
@@ -63,6 +64,7 @@ namespace Hullbreach.NetCode.Entities
             Active = false;
             Requests.Clear();
             if (_hover != null) Destroy(_hover);
+            if (_hoverSprite != null) Destroy(_hoverSprite);
         }
 
         void Update()
@@ -179,9 +181,10 @@ namespace Hullbreach.NetCode.Entities
         {
             if (_hover == null)
             {
-                _hover = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                _hover.name = "NetworkBuildPreview";
-                Destroy(_hover.GetComponent<Collider>());
+                _hover = new GameObject("NetworkBuildPreview");
+                _hoverSprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0, 0, 1, 1),
+                    new Vector2(0.5f, 0.5f), 1f);
+                _hover.AddComponent<SpriteRenderer>().sprite = _hoverSprite;
             }
             _hover.SetActive(_hasHover);
             float2 world = ship.LocalToWorld(BlockGrid.CenterOf(key));
@@ -189,7 +192,7 @@ namespace Hullbreach.NetCode.Entities
                 Quaternion.Euler(0f, 0f, ship.Rotation * Mathf.Rad2Deg));
             Color color = _hoverValid ? Color.green : Color.red;
             color.a = 0.45f;
-            _hover.GetComponent<MeshRenderer>().material.color = color;
+            _hover.GetComponent<SpriteRenderer>().color = color;
         }
 
         void SetHoverVisible(bool visible)

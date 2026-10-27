@@ -132,8 +132,10 @@ client, `Hullbreach match: connected as #N; replicated ships: K`.
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLanLobby.cs::HullbreachLanLobby -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLanLobby.cs::HullbreachLanLobby.TryHost -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLanLobby.cs::HullbreachLanLobby.TryJoin -->
+<!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLanLobby.cs::HullbreachLanLobby.TryPrepareLanClient -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLobbyView.cs::HullbreachLobbyView.HostLan -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLobbyView.cs::HullbreachLobbyView.JoinLan -->
+<!-- describes: Assets/Editor/Hullbreach.Editor/LobbySceneBuilder.cs::LobbySceneBuilder.AddLanControlsMenu -->
 
 The lobby has a PLAY ON LAN section that needs no Unity Services account.
 HOST LAN asks the idle server world to listen on 0.0.0.0:7979 and the idle
@@ -144,9 +146,17 @@ shown in the lobby's error line and nothing is started. Log lines:
 `Hullbreach LAN: hosting on ...`, `Hullbreach LAN: joining ...` and
 `Hullbreach LAN: ... refused: ...`.
 
-The three controls are optional serialized fields on `HullbreachLobbyView`,
-so an old `LobbyCanvas.prefab` keeps working; rebuild it with
-`Hullbreach > Online > Rebuild lobby and multiplayer scenes` to get them.
+joining switches the idle client's transport to udp before connecting. netcode's
+default client uses ipc when this process also has a server world, but ipc cannot
+reach another game process. the host keeps its normal ipc and udp listeners.
+an existing or pending connection is rejected before changing its driver; restart
+the game to join a different lan match after leaving one.
+
+the three controls are serialized fields on `HullbreachLobbyView` and live
+at the top of the right column, above the public lobby list. to update an
+older prefab, run `Hullbreach > Online > Add LAN controls to lobby prefab`.
+this adds and wires the controls without rebuilding the relay controls or
+scenes. running it again reuses the same controls.
 
 ### Unity Services setup
 

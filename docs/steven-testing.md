@@ -14,7 +14,7 @@ paths are retained.
 2. start the platform api and create an account through the website.
    the game defaults to `http://127.0.0.1:8000`. if the api is elsewhere,
    set `HULLBREACH_PLATFORM_URL` in the terminal that launches the game.
-3. close the editor and run `.\play.cmd build` from this repository.
+3. close the editor and run `.\play.cmd build --backend mono` from this repository.
    the development build goes in `Builds\windows-client`.
 4. for a verified account inside a match, the hosting process needs
    `HULLBREACH_PLATFORM_SERVER_KEY` to match a key configured on the api
@@ -91,9 +91,27 @@ test additionally checks login, restoration without a server key,
 required server admission, forged-token rejection, logout, and rejection
 of the revoked token. see [live test setup](platform-link.md#testing).
 
-the local machine did not have the pinned editor version available.
-a disposable-copy compile attempt with installed unity `6000.2.9f1`
-exited before compilation and reported missing headless licensing
-entitlements. the project's version and packages were left unchanged.
-the unity build and two-player visual checks above still need to be run
-with the pinned editor and an active license.
+unity `6000.0.43f1` is installed and licensed on the test machine. the
+windows development client builds with the mono backend. the visible
+game form passed wrong-password rejection, two separate account logins,
+remembered-session restoration, and sign-out revocation checked against
+the api. the authenticated direct-connect test verified two different
+network ids and two replicated ships, and a guest received the required
+account rejection before the server disconnected it.
+
+nine unity editmode tests pass: four check the lobby controls, two check
+saved rendering and sprite assets, and three check lan transport setup.
+the transport test starts with the lobby's ipc client and proves that
+the lan setup can connect it to a udp listener.
+
+the visible windows test also passed: both accounts signed in, host lan
+and join address connected two separate processes, both windows showed
+two ships with network ids 1 and 2, and thrust, steering, and firing
+worked. closing the host eventually showed the persistent disconnected
+message on the second player. restart the game copies between matches.
+
+the development client logged server-tick prediction corrections during
+the test, including while waiting for the closed host to time out. the
+exact timing/performance cause is not established. local connection and
+account checks passed, but this is not a clean performance benchmark.
+relay and play between separate computers were not tested in this run.

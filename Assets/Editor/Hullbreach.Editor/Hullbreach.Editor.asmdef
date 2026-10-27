@@ -11,6 +11,8 @@
         "Unity.Entities",
         "Unity.NetCode",
         "Unity.NetCode.Authoring.Hybrid",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime",
         "Unity.Scenes",
         "Unity.TextMeshPro",
         "UnityEngine.UI"
