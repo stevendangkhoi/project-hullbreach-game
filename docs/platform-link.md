@@ -73,8 +73,8 @@ against recorded logs, including the live integration test.
 ## Handshake
 
 1. The player signs in on the client (the S07-2 sign-in screen calls
-   `PlatformClient.Login`); the token goes into `PlatformSession`, in
-   memory only.
+   `PlatformClient.Login`); the token goes into `PlatformSession` and the
+   per-user [remembered session](#remembered-session) file.
 2. The client connects through the lobby/Relay or direct path as before.
    When the client world first sees its `NetworkId`,
    `HullbreachPlatformAuthClientSystem` sends one
@@ -96,6 +96,10 @@ against recorded logs, including the live integration test.
 5. The client stores the verdict in `HullbreachPlatformAdmission`;
    `HullbreachNetworkGameHud` shows its `StatusLine` (for example
    `Platform: signed in as pilot`).
+
+the rejection reason stays on the hud after the server disconnects the
+player. a new connection clears the previous verdict. a lost connection
+after admission shows a disconnected message with the leave action.
 
 Policy by mode:
 
@@ -348,7 +352,7 @@ properties onto the widgets and forwards clicks.
 | --- | --- | --- | --- |
 | `Editing` | shown, editable | hidden | message line shows the last error in red |
 | `Busy` | shown, read-only | hidden | "Signing in..."; a second submit is ignored; **Play offline** still works and a late answer is dropped |
-| `SignedIn` | hidden | "Signed in as name" | token kept in `PlatformSession` (memory only) |
+| `SignedIn` | hidden | "Signed in as name" | token kept in `PlatformSession` and the per-user session file |
 | `Offline` | hidden | "Playing offline" | no token; hello carries none |
 
 The message for each failed sign-in is the `LoginOutcome` message from
@@ -356,6 +360,15 @@ the [failure modes](#failure-modes) table; an unreachable platform adds
 "You can still play offline." The password field is cleared as soon as a
 request is sent, and neither the password nor the token is ever logged or
 shown. Enter in the password field submits.
+
+**sign out** clears the local session and saved file immediately, then
+calls `POST /api/v1/auth/logout` with that session's bearer token. this
+revokes only the current session. if the platform cannot be reached,
+the form explains that local sign-out succeeded but remote revocation
+did not. a 401 means the session is already invalid. a delayed logout
+response cannot replace a newer sign-in attempt. disabling the view calls
+`SignInModel.CancelPending` so a late login or restore response cannot
+sign the player in after the screen closes.
 
 Tab moves to the next widget (username, password, **Sign in**, **Play
 offline**, then back to username) and Shift+Tab to the previous one;
@@ -387,6 +400,9 @@ the player is simply offline.
 <!-- describes: Assets/Scripts/Hullbreach.Platform/SignInModel.cs::SignInModel.Submit -->
 <!-- describes: Assets/Scripts/Hullbreach.Platform/SignInModel.cs::SignInModel.PlayOffline -->
 <!-- describes: Assets/Scripts/Hullbreach.Platform/SignInModel.cs::SignInModel.SignOut -->
+<!-- describes: Assets/Scripts/Hullbreach.Platform/SignInModel.cs::SignInModel.CancelPending -->
+<!-- describes: Assets/Scripts/Hullbreach.Platform/PlatformClient.cs::PlatformClient.LogoutPath -->
+<!-- describes: Assets/Scripts/Hullbreach.Platform/PlatformClient.cs::PlatformClient.Logout -->
 <!-- describes: Assets/Scripts/Hullbreach.Platform/SignInModel.cs::SignInModel.MessageFor -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachSignInView.cs::HullbreachSignInView -->
 <!-- describes: Assets/Editor/Hullbreach.Editor/LobbySceneBuilder.cs::LobbySceneBuilder.AddSignInMenu -->
@@ -403,19 +419,23 @@ and token to `platform-session.txt` under Unity's per-user
 `Application.persistentDataPath` (two lines: username, token; the file
 is plain text, so it relies on the per-user folder's permissions). On the
 next launch the sign-in screen calls `SignInModel.TryRestore`, which
-checks the stored token with `GET /api/v1/auth/session` while the form
+checks the stored token with `GET /api/v1/me` while the form
 shows "Restoring your session...":
 
 | Platform answer | Result | Stored file |
 | --- | --- | --- |
-| 200 | `SignedIn` as the stored username; `PlatformSession.Token` carries the token | kept |
+| 200 with a valid profile | `SignedIn` as the current profile username; `PlatformSession.Token` carries the token | updated with the current username |
 | 401 | form shown with "Your saved session expired. Sign in again." | deleted |
-| unreachable / other | form shown, no message | kept for next launch |
+| unreachable / malformed / other | form shown with a restore error; sign-in and offline play remain available | kept for next launch |
+
+the player request sends only the bearer token. `/auth/session` remains
+the game-server validation route and requires `X-Server-Key`; a player
+client must not need that key to restore its own login.
 
 The stored token is presented when joining a match exactly as a fresh one
 is: the client handshake reads `PlatformSession.Token` into the hello (see
 [the handshake](#handshake)). **Sign out** deletes
-the file; **Play offline** leaves it alone. A malformed file is deleted,
+the file and asks the platform to revoke the session; **Play offline** leaves it alone. A malformed file is deleted,
 and an unwritable folder only logs a warning (the player signs in again
 next launch). Neither the token nor the password is ever logged.
 
@@ -425,12 +445,15 @@ next launch). Neither the token nor the password is ever logged.
 <!-- describes: Assets/Scripts/Hullbreach.Platform/SessionTokenStore.cs::SessionTokenStore.TryLoad -->
 <!-- describes: Assets/Scripts/Hullbreach.Platform/SessionTokenStore.cs::SessionTokenStore.Clear -->
 <!-- describes: Assets/Scripts/Hullbreach.Platform/SignInModel.cs::SignInModel.TryRestore -->
+<!-- describes: Assets/Scripts/Hullbreach.Platform/PlatformClient.cs::PlatformClient.ProfilePath -->
+<!-- describes: Assets/Scripts/Hullbreach.Platform/PlatformClient.cs::PlatformClient.RestoreSession -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachPlatformRuntime.cs::HullbreachPlatformRuntime.TokenStore -->
 
 ## Hullbreach.Platform module reference
 
 The remaining engine-free types: `PlatformClient` (typed calls to
-`POST /api/v1/auth/login` and `GET /api/v1/auth/session` that never throw
+`POST /api/v1/auth/login`, `GET /api/v1/me`, `POST /api/v1/auth/logout`,
+and `GET /api/v1/auth/session` that never throw
 for network or HTTP failures), the `IPlatformHttp` request/response
 types, `PlatformJson` (a minimal JSON reader/writer: the assembly has no
 engine or package references, so neither `JsonUtility` nor
@@ -479,9 +502,12 @@ matchmaking queue's leave call (`reference/hullbreach-net.md#matchmaking`).
 - `PlatformLiveIntegrationTests` runs only when `HULLBREACH_PLATFORM_IT_URL`
   is set. It signs in with `HULLBREACH_PLATFORM_IT_USER` /
   `HULLBREACH_PLATFORM_IT_PASSWORD` (wrong password first, to prove the
-  401 mapping), then runs the admission gate in required mode with
+  401 mapping), restores the session through `/me` without a server key,
+  then runs the admission gate in required mode with
   `HULLBREACH_PLATFORM_SERVER_KEY`, admitting the real token and
-  rejecting a forged one, and asserts no secret appeared in any log line.
+  rejecting a forged one. it signs out and checks that both restoration
+  and admission reject the revoked token, and asserts no secret appeared
+  in any log line.
   Pass the variables to the test host with `dotnet test -e`, which also
   works under WSL with the Windows `dotnet.exe` (WSLENV forwarding does
   not reach the test host there), e.g.

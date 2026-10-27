@@ -6,6 +6,9 @@ and try to breach each other's hull. Accounts, ELO, match history, and the
 store are in the [platform repo](https://github.com/lognd/project-hullbreach-platform#readme);
 this one talks to that API over HTTP(S).
 
+for the sign-in changes on steven's branch, use the
+[account and two-player test guide](docs/steven-testing.md).
+
 Company of Theseus, UF CEN3031, fall 2026. All rights reserved, see
 [LICENSE](LICENSE).
 

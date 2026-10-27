@@ -85,10 +85,10 @@ namespace Hullbreach.Platform
         public void TryRestore()
         {
             if (_store == null || State != SignInState.Editing) return;
-            if (!_store.TryLoad(out string username, out string token)) return;
+            if (!_store.TryLoad(out _, out string token)) return;
             int attempt = ++_attempt;
             Set(SignInState.Busy, "Restoring your session...", isError: false);
-            _client.ValidateSession(token, outcome => OnRestore(attempt, username, token, outcome));
+            _client.RestoreSession(token, outcome => OnRestore(attempt, outcome));
         }
 
         // frob:doc docs/platform-link.md#sign-in-screen
@@ -130,8 +130,9 @@ namespace Hullbreach.Platform
         public void SignOut()
         {
             if (!IsDone) return;
-            _attempt++;
+            int attempt = ++_attempt;
             bool wasSignedIn = State == SignInState.SignedIn;
+            string token = PlatformSession.Token;
             PlatformSession.SignOut();
             _store?.Clear();
             _log.Info(wasSignedIn
@@ -139,6 +140,25 @@ namespace Hullbreach.Platform
                 : "Hullbreach sign-in: leaving offline mode to sign in.");
             LastStatus = null;
             Set(SignInState.Editing, wasSignedIn ? "Signed out." : string.Empty, isError: false);
+            if (wasSignedIn)
+            {
+                _client.Logout(token, revoked =>
+                {
+                    // a late sign-out answer must not change a newer sign-in attempt.
+                    if (!revoked && attempt == _attempt && State == SignInState.Editing)
+                        Set(SignInState.Editing,
+                            "Signed out on this device. The platform could not revoke the session; it will expire normally.",
+                            isError: true);
+                });
+            }
+        }
+
+        // stop a closed screen from signing the player in after its request finishes.
+        // frob:doc docs/platform-link.md#sign-in-screen
+        public void CancelPending()
+        {
+            _attempt++;
+            if (State == SignInState.Busy) Set(SignInState.Editing, string.Empty, isError: false);
         }
 
         // frob:doc docs/platform-link.md#sign-in-screen
@@ -163,25 +183,26 @@ namespace Hullbreach.Platform
             Set(SignInState.Editing, MessageFor(outcome), isError: true);
         }
 
-        void OnRestore(int attempt, string username, string token, SessionOutcome outcome)
+        void OnRestore(int attempt, LoginOutcome outcome)
         {
             if (attempt != _attempt || State != SignInState.Busy)
             {
                 _log.Info($"Hullbreach sign-in: dropping a late {outcome.Status} session check; the player moved on.");
                 return;
             }
-            if (outcome.IsValid)
+            if (outcome.IsSuccess)
             {
-                PlatformSession.SignIn(username, token);
-                _log.Info($"Hullbreach sign-in: restored the remembered session for '{username}'.");
-                Set(SignInState.SignedIn, "Signed in as " + username + ".", isError: false);
+                PlatformSession.SignIn(outcome.Username, outcome.Token);
+                _store.Save(outcome.Username, outcome.Token);
+                _log.Info($"Hullbreach sign-in: restored the remembered session for '{outcome.Username}'.");
+                Set(SignInState.SignedIn, "Signed in as " + outcome.Username + ".", isError: false);
                 return;
             }
-            // Only a 401 proves the token is dead; an unreachable platform keeps it for next time.
-            bool expired = outcome.Status == SessionStatus.Invalid;
+            // only a 401 proves the token is dead; keep it through temporary failures.
+            bool expired = outcome.Status == LoginStatus.InvalidCredentials;
             if (expired) _store.Clear();
             _log.Info($"Hullbreach sign-in: remembered session not restored ({outcome.Status}).");
-            Set(SignInState.Editing, expired ? "Your saved session expired. Sign in again." : string.Empty, isError: false);
+            Set(SignInState.Editing, outcome.Message, isError: true);
         }
 
         void Set(SignInState state, string message, bool isError)

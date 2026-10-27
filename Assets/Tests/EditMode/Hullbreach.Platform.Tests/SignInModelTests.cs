@@ -167,6 +167,7 @@ namespace Hullbreach.Platform.Tests
         {
             _http.Enqueue(LoginOk("pilot"));
             _model.Submit("pilot", Password);
+            _http.Enqueue(PlatformHttpResponse.Http(204, ""));
             _model.SignOut();
 
             Assert.AreEqual(SignInState.Editing, _model.State);
@@ -174,6 +175,49 @@ namespace Hullbreach.Platform.Tests
             Assert.IsFalse(PlatformSession.HasChosen);
             Assert.AreEqual(string.Empty, PlatformSession.Token);
             Assert.IsNull(_model.LastStatus);
+        }
+
+        [Test]
+        public void FailedLogoutStillClearsLocalSessionAndExplainsTheFailure()
+        {
+            _http.Enqueue(LoginOk("pilot"));
+            _model.Submit("pilot", Password);
+            _http.Enqueue(PlatformHttpResponse.Transport("offline"));
+            _model.SignOut();
+
+            Assert.IsFalse(PlatformSession.HasChosen);
+            Assert.AreEqual(SignInState.Editing, _model.State);
+            Assert.IsTrue(_model.IsError);
+            StringAssert.Contains("could not revoke", _model.Message);
+        }
+
+        [Test]
+        public void LateLogoutFailureCannotOverwriteAnotherLogin()
+        {
+            _http.Enqueue(LoginOk("pilot"));
+            _model.Submit("pilot", Password);
+            _http.Hold = true;
+            _model.SignOut();
+            _model.Submit("second-pilot", Password);
+            _http.Complete(0, PlatformHttpResponse.Transport("offline"));
+
+            Assert.AreEqual(SignInState.Busy, _model.State);
+            Assert.AreEqual("Signing in...", _model.Message);
+            _http.Complete(1, LoginOk("second-pilot"));
+            Assert.AreEqual("second-pilot", PlatformSession.Username);
+        }
+
+        [Test]
+        public void ClosingScreenPreventsLateLoginFromChangingTheSession()
+        {
+            // frob:tests Assets/Scripts/Hullbreach.Platform/SignInModel.cs::SignInModel.CancelPending kind="unit"
+            _http.Hold = true;
+            _model.Submit("pilot", Password);
+            _model.CancelPending();
+            _http.Complete(0, LoginOk("pilot"));
+
+            Assert.AreEqual(SignInState.Editing, _model.State);
+            Assert.IsFalse(PlatformSession.HasChosen);
         }
 
         [Test]

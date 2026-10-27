@@ -59,6 +59,7 @@ namespace Hullbreach.NetCode.Entities
         void OnDisable()
         {
             _model.Changed -= Refresh;
+            _model.CancelPending();
             signInButton.onClick.RemoveListener(Submit);
             passwordInput.onSubmit.RemoveListener(SubmitFromField);
             playOfflineButton.onClick.RemoveListener(_model.PlayOffline);

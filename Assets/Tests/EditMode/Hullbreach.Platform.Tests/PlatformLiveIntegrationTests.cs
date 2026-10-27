@@ -169,6 +169,15 @@ namespace Hullbreach.Platform.Tests
             Say("login: " + login + " token=" + (login.Token.Length > 0 ? "<redacted, " + login.Token.Length + " chars>" : "<none>"));
             Assert.AreEqual(LoginStatus.Success, login.Status, login.Message);
 
+            // a normal client restores its session without the game server's key.
+            var playerClient = new PlatformClient(clientConfig, http, log);
+            LoginOutcome restored = default;
+            playerClient.RestoreSession(login.Token, o => restored = o);
+            Assert.AreEqual(LoginStatus.Success, restored.Status, restored.Message);
+            Assert.AreEqual(login.Username, restored.Username);
+            Assert.AreEqual(login.Token, restored.Token);
+            Say("saved session restored through /me without a server key.");
+
             // Server side: the gate in required mode, exactly as the dedicated server runs it.
             var serverClient = new PlatformClient(serverConfig, http, log);
             var gate = new PlatformAdmissionGate(serverClient, true, serverConfig.HelloTimeoutSeconds, log);
@@ -184,6 +193,17 @@ namespace Hullbreach.Platform.Tests
             Assert.IsTrue(gate.TryTakeDecision(out var rejected));
             Say("server decision (forged token): " + rejected);
             Assert.IsFalse(rejected.Admitted);
+
+            bool loggedOut = false;
+            playerClient.Logout(login.Token, ok => loggedOut = ok);
+            Assert.IsTrue(loggedOut, "the platform did not revoke the session");
+            playerClient.RestoreSession(login.Token, o => restored = o);
+            Assert.AreEqual(LoginStatus.InvalidCredentials, restored.Status);
+            gate.OnConnected(3, 0);
+            gate.OnHello(3, login.Token, login.Username, 0.1);
+            Assert.IsTrue(gate.TryTakeDecision(out var signedOut));
+            Assert.IsFalse(signedOut.Admitted);
+            Say("sign-out revoked the token for both restore and server admission.");
 
             foreach (string line in log.Lines)
             {
