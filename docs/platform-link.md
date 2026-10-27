@@ -97,8 +97,8 @@ against recorded logs, including the live integration test.
    `HullbreachNetworkGameHud` shows its `StatusLine` (for example
    `Platform: signed in as pilot`).
 
-the rejection reason stays on the hud after the server disconnects the
-player. a new connection clears the previous verdict. a lost connection
+The rejection reason stays on the HUD after the server disconnects the
+player. A new connection clears the previous verdict. A lost connection
 after admission shows a disconnected message with the leave action.
 
 Policy by mode:
@@ -361,12 +361,12 @@ the [failure modes](#failure-modes) table; an unreachable platform adds
 request is sent, and neither the password nor the token is ever logged or
 shown. Enter in the password field submits.
 
-**sign out** clears the local session and saved file immediately, then
-calls `POST /api/v1/auth/logout` with that session's bearer token. this
-revokes only the current session. if the platform cannot be reached,
+**Sign out** clears the local session and saved file immediately, then
+calls `POST /api/v1/auth/logout` with that session's bearer token. This
+revokes only the current session. If the platform cannot be reached,
 the form explains that local sign-out succeeded but remote revocation
-did not. a 401 means the session is already invalid. a delayed logout
-response cannot replace a newer sign-in attempt. disabling the view calls
+did not. A 401 means the session is already invalid. A delayed logout
+response cannot replace a newer sign-in attempt. Disabling the view calls
 `SignInModel.CancelPending` so a late login or restore response cannot
 sign the player in after the screen closes.
 
@@ -428,7 +428,7 @@ shows "Restoring your session...":
 | 401 | form shown with "Your saved session expired. Sign in again." | deleted |
 | unreachable / malformed / other | form shown with a restore error; sign-in and offline play remain available | kept for next launch |
 
-the player request sends only the bearer token. `/auth/session` remains
+The player request sends only the bearer token. `/auth/session` remains
 the game-server validation route and requires `X-Server-Key`; a player
 client must not need that key to restore its own login.
 
@@ -505,7 +505,7 @@ matchmaking queue's leave call (`reference/hullbreach-net.md#matchmaking`).
   401 mapping), restores the session through `/me` without a server key,
   then runs the admission gate in required mode with
   `HULLBREACH_PLATFORM_SERVER_KEY`, admitting the real token and
-  rejecting a forged one. it signs out and checks that both restoration
+  rejecting a forged one. It signs out and checks that both restoration
   and admission reject the revoked token, and asserts no secret appeared
   in any log line.
   Pass the variables to the test host with `dotnet test -e`, which also

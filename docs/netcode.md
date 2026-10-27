@@ -146,17 +146,17 @@ shown in the lobby's error line and nothing is started. Log lines:
 `Hullbreach LAN: hosting on ...`, `Hullbreach LAN: joining ...` and
 `Hullbreach LAN: ... refused: ...`.
 
-joining switches the idle client's transport to udp before connecting. netcode's
-default client uses ipc when this process also has a server world, but ipc cannot
-reach another game process. the host keeps its normal ipc and udp listeners.
-an existing or pending connection is rejected before changing its driver; restart
-the game to join a different lan match after leaving one.
+Joining switches the idle client's transport to UDP before connecting. Netcode's
+default client uses IPC when this process also has a server world, but IPC cannot
+reach another game process. The host keeps its normal IPC and UDP listeners.
+An existing or pending connection is rejected before changing its driver; restart
+the game to join a different LAN match after leaving one.
 
-the three controls are serialized fields on `HullbreachLobbyView` and live
-at the top of the right column, above the public lobby list. to update an
+The three controls are serialized fields on `HullbreachLobbyView` and live
+at the top of the right column, above the public lobby list. To update an
 older prefab, run `Hullbreach > Online > Add LAN controls to lobby prefab`.
-this adds and wires the controls without rebuilding the relay controls or
-scenes. running it again reuses the same controls.
+This adds and wires the controls without rebuilding the Relay controls or
+scenes. Running it again reuses the same controls.
 
 ### Unity Services setup
 
