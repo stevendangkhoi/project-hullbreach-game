@@ -148,6 +148,85 @@ namespace Hullbreach.Platform.Tests
         }
 
         [Test]
+        public void RestoreSession_UsesOwnProfileWithoutServerKey()
+        {
+            // frob:tests Assets/Scripts/Hullbreach.Platform/PlatformClient.cs::PlatformClient.RestoreSession kind="unit"
+            var http = new FakePlatformHttp();
+            var log = new RecordingPlatformLog();
+            http.Enqueue(PlatformHttpResponse.Http(200, "{\"id\":\"u-1\",\"username\":\"renamed-pilot\",\"role\":\"player\"}"));
+            LoginOutcome result = default;
+            Client(http, log, Key).RestoreSession(Token, outcome => result = outcome);
+
+            Assert.AreEqual("http://platform.test:8002/api/v1/me", http.Requests[0].Url);
+            Assert.AreEqual(PlatformHttpMethod.Get, http.Requests[0].Method);
+            Assert.AreEqual("Bearer " + Token, http.Requests[0].Header("Authorization"));
+            Assert.IsNull(http.Requests[0].Header(PlatformClient.ServerKeyHeader));
+            Assert.IsTrue(result.IsSuccess);
+            Assert.AreEqual("renamed-pilot", result.Username);
+            Assert.AreEqual(Token, result.Token);
+            StringAssert.DoesNotContain("SECRET", log.All);
+        }
+
+        [TestCase(401, "{}", LoginStatus.InvalidCredentials)]
+        [TestCase(500, "{}", LoginStatus.Failed)]
+        [TestCase(200, "not json", LoginStatus.Failed)]
+        [TestCase(200, "{\"id\":\"u-1\"}", LoginStatus.Failed)]
+        [TestCase(200, "{\"username\":\"pilot\"}", LoginStatus.Failed)]
+        public void RestoreSession_RejectsExpiredOrMalformedProfile(int status, string body, LoginStatus expected)
+        {
+            var http = new FakePlatformHttp();
+            http.Enqueue(PlatformHttpResponse.Http(status, body));
+            LoginOutcome result = default;
+            Client(http, new RecordingPlatformLog()).RestoreSession(Token, outcome => result = outcome);
+            Assert.AreEqual(expected, result.Status);
+            Assert.IsEmpty(result.Token);
+        }
+
+        [Test]
+        public void RestoreSession_EmptyTokenSendsNothing()
+        {
+            var http = new FakePlatformHttp();
+            LoginOutcome result = default;
+            Client(http, new RecordingPlatformLog()).RestoreSession("", outcome => result = outcome);
+            Assert.AreEqual(LoginStatus.InvalidCredentials, result.Status);
+            Assert.IsEmpty(http.Requests);
+        }
+
+        [TestCase(204, true)]
+        [TestCase(401, true)]
+        [TestCase(500, false)]
+        public void Logout_RevokesOnlyThePresentedSession(int status, bool expected)
+        {
+            // frob:tests Assets/Scripts/Hullbreach.Platform/PlatformClient.cs::PlatformClient.Logout kind="unit"
+            var http = new FakePlatformHttp();
+            var log = new RecordingPlatformLog();
+            http.Enqueue(PlatformHttpResponse.Http(status, ""));
+            bool revoked = !expected;
+            Client(http, log, Key).Logout(Token, result => revoked = result);
+
+            Assert.AreEqual(expected, revoked);
+            Assert.AreEqual(PlatformHttpMethod.Post, http.Requests[0].Method);
+            Assert.AreEqual("http://platform.test:8002/api/v1/auth/logout", http.Requests[0].Url);
+            Assert.AreEqual("Bearer " + Token, http.Requests[0].Header("Authorization"));
+            Assert.IsNull(http.Requests[0].Header(PlatformClient.ServerKeyHeader));
+            StringAssert.DoesNotContain("SECRET", log.All);
+        }
+
+        [Test]
+        public void Logout_ReportsTransportFailureAndSkipsEmptyTokens()
+        {
+            var http = new FakePlatformHttp();
+            http.Enqueue(PlatformHttpResponse.Transport("offline"));
+            var client = Client(http, new RecordingPlatformLog());
+            bool revoked = true;
+            client.Logout(Token, result => revoked = result);
+            Assert.IsFalse(revoked);
+            client.Logout("", result => revoked = result);
+            Assert.IsTrue(revoked);
+            Assert.AreEqual(1, http.Requests.Count);
+        }
+
+        [Test]
         public void MapSession_CoversEveryBranch()
         {
             Assert.AreEqual(SessionStatus.Unreachable, PlatformClient.MapSession(PlatformHttpResponse.Transport("timeout")).Status);

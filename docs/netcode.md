@@ -132,8 +132,10 @@ client, `Hullbreach match: connected as #N; replicated ships: K`.
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLanLobby.cs::HullbreachLanLobby -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLanLobby.cs::HullbreachLanLobby.TryHost -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLanLobby.cs::HullbreachLanLobby.TryJoin -->
+<!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLanLobby.cs::HullbreachLanLobby.TryPrepareLanClient -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLobbyView.cs::HullbreachLobbyView.HostLan -->
 <!-- describes: Assets/Scripts/Hullbreach.NetCode.Entities/HullbreachLobbyView.cs::HullbreachLobbyView.JoinLan -->
+<!-- describes: Assets/Editor/Hullbreach.Editor/LobbySceneBuilder.cs::LobbySceneBuilder.AddLanControlsMenu -->
 
 The lobby has a PLAY ON LAN section that needs no Unity Services account.
 HOST LAN asks the idle server world to listen on 0.0.0.0:7979 and the idle
@@ -144,9 +146,17 @@ shown in the lobby's error line and nothing is started. Log lines:
 `Hullbreach LAN: hosting on ...`, `Hullbreach LAN: joining ...` and
 `Hullbreach LAN: ... refused: ...`.
 
-The three controls are optional serialized fields on `HullbreachLobbyView`,
-so an old `LobbyCanvas.prefab` keeps working; rebuild it with
-`Hullbreach > Online > Rebuild lobby and multiplayer scenes` to get them.
+Joining switches the idle client's transport to UDP before connecting. Netcode's
+default client uses IPC when this process also has a server world, but IPC cannot
+reach another game process. The host keeps its normal IPC and UDP listeners.
+An existing or pending connection is rejected before changing its driver; restart
+the game to join a different LAN match after leaving one.
+
+The three controls are serialized fields on `HullbreachLobbyView` and live
+at the top of the right column, above the public lobby list. To update an
+older prefab, run `Hullbreach > Online > Add LAN controls to lobby prefab`.
+This adds and wires the controls without rebuilding the Relay controls or
+scenes. Running it again reuses the same controls.
 
 ### Unity Services setup
 
@@ -164,6 +174,20 @@ press **Start Game** in the host. Both instances should load the multiplayer
 scene, show two ships, and report `Replicated ships: 2`. A password is optional
 for public and private lobbies, but when present must be 8-64 characters
 because that is the Unity Lobby service contract.
+
+Leaving an online room disconnects both the local client and any hosted peers.
+The lobby waits for Netcode to remove the connection entities before replacing
+the old drivers with idle ones. This also stops the host's Relay listener, so a
+later host or join operation can reuse the running game. If cleanup cannot finish
+within ten seconds, the error asks the player to restart instead of resetting a
+driver that still has live connections. A deleted room uses the same local cleanup.
+Cleanup also clears the previous match's ships, projectiles, queued messages, and
+client sequence history. Rehosting starts with a fresh simulation and replica
+while preserving the scene's baked ghost prefabs.
+
+When joining finishes, the game checks the room's current scene property as well
+as later updates. This covers a host starting the match while another player's
+join request is still completing.
 
 ## The governing rule: send causes, not effects
 

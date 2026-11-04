@@ -123,7 +123,7 @@ namespace Hullbreach.Platform.Tests
         public void Restore_ValidTokenSignsInAndSendsBearer()
         {
             NewStore().Save("Pilot", Token);
-            _http.Enqueue(PlatformHttpResponse.Http(200, "{\"user_id\":\"u-1\",\"role\":\"player\"}"));
+            _http.Enqueue(PlatformHttpResponse.Http(200, "{\"id\":\"u-1\",\"username\":\"Pilot\",\"role\":\"player\"}"));
             var model = NewModel();
             model.TryRestore();
 
@@ -132,6 +132,8 @@ namespace Hullbreach.Platform.Tests
             // The join handshake reads this token from PlatformSession.
             Assert.AreEqual(Token, PlatformSession.Token);
             Assert.AreEqual("Bearer " + Token, _http.Requests[0].Header("authorization"));
+            Assert.AreEqual("http://platform.test/api/v1/me", _http.Requests[0].Url);
+            Assert.IsNull(_http.Requests[0].Header(PlatformClient.ServerKeyHeader));
             StringAssert.DoesNotContain(Token, _log.All);
         }
 
@@ -180,7 +182,7 @@ namespace Hullbreach.Platform.Tests
             model.TryRestore();
             Assert.AreEqual(SignInState.Busy, model.State);
             model.PlayOffline();
-            _http.Complete(0, PlatformHttpResponse.Http(200, "{\"user_id\":\"u-1\",\"role\":\"player\"}"));
+            _http.Complete(0, PlatformHttpResponse.Http(200, "{\"id\":\"u-1\",\"username\":\"Pilot\",\"role\":\"player\"}"));
 
             Assert.AreEqual(SignInState.Offline, model.State);
             Assert.IsFalse(PlatformSession.IsSignedIn);
@@ -190,11 +192,37 @@ namespace Hullbreach.Platform.Tests
         public void SignOut_ForgetsRememberedSession()
         {
             NewStore().Save("Pilot", Token);
-            _http.Enqueue(PlatformHttpResponse.Http(200, "{\"user_id\":\"u-1\",\"role\":\"player\"}"));
+            _http.Enqueue(PlatformHttpResponse.Http(200, "{\"id\":\"u-1\",\"username\":\"Pilot\",\"role\":\"player\"}"));
             var model = NewModel();
             model.TryRestore();
             model.SignOut();
             Assert.IsFalse(File.Exists(_path));
+        }
+
+        [Test]
+        public void Restore_UsesCurrentProfileNameAndUpdatesStoredName()
+        {
+            NewStore().Save("old-name", Token);
+            _http.Enqueue(PlatformHttpResponse.Http(200, "{\"id\":\"u-1\",\"username\":\"new-name\"}"));
+            NewModel().TryRestore();
+
+            Assert.AreEqual("new-name", PlatformSession.Username);
+            Assert.IsTrue(NewStore().TryLoad(out string username, out _));
+            Assert.AreEqual("new-name", username);
+        }
+
+        [Test]
+        public void Restore_ClosedScreenCannotRestoreTokenLater()
+        {
+            NewStore().Save("Pilot", Token);
+            _http.Hold = true;
+            var model = NewModel();
+            model.TryRestore();
+            model.CancelPending();
+            _http.Complete(0, PlatformHttpResponse.Http(200, "{\"id\":\"u-1\",\"username\":\"Pilot\"}"));
+
+            Assert.IsFalse(PlatformSession.IsSignedIn);
+            Assert.IsTrue(File.Exists(_path));
         }
 
         [Test]

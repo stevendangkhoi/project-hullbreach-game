@@ -11,8 +11,13 @@ namespace Hullbreach.NetCode.Entities
     {
         [SerializeField] TMP_Text statusText;
         [SerializeField] Button leaveButton;
+        bool _wasConnected;
 
-        void OnEnable() => leaveButton.onClick.AddListener(Leave);
+        void OnEnable()
+        {
+            _wasConnected = false;
+            leaveButton.onClick.AddListener(Leave);
+        }
         void OnDisable() => leaveButton.onClick.RemoveListener(Leave);
 
         void Update()
@@ -23,9 +28,17 @@ namespace Hullbreach.NetCode.Entities
             string controls = HullbreachNetworkGameplayController.IsBuildMode
                 ? $"1-7 select • click place • right-click remove • Tab fly\n{HullbreachNetworkGameplayController.BuildStatus}"
                 : "W/S thrust • A/D steer • Space/click fire • Tab build";
-            statusText.text = HullbreachNetCodeClient.IsConnected
-                ? $"Connected as #{HullbreachNetCodeClient.LocalNetworkId}  •  Replicated ships: {shipCount}  •  {mode}\n{HullbreachPlatformAdmission.StatusLine}\n{controls}"
-                : "Waiting for Netcode connection...";
+            if (HullbreachNetCodeClient.IsConnected)
+            {
+                _wasConnected = true;
+                statusText.text = $"Connected as #{HullbreachNetCodeClient.LocalNetworkId}  •  Replicated ships: {shipCount}  •  {mode}\n{HullbreachPlatformAdmission.StatusLine}\n{controls}";
+            }
+            else if (HullbreachPlatformAdmission.HasVerdict && !HullbreachPlatformAdmission.Admitted)
+                statusText.text = HullbreachPlatformAdmission.StatusLine + "\nUse Leave to exit this match.";
+            else
+                statusText.text = _wasConnected
+                    ? "Disconnected from the server. Use Leave to exit this match."
+                    : "Waiting for Netcode connection...";
         }
 
         async void Leave()

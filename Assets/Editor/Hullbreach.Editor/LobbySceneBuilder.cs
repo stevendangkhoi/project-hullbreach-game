@@ -43,8 +43,67 @@ namespace Hullbreach.Editor
             Debug.Log("LobbySceneBuilder: lobby scene has the sign-in screen.");
         }
 
+        // update the existing prefab without rebuilding its relay controls or scenes.
+        // frob:doc docs/netcode.md#lan-host-and-join-from-the-lobby
+        [MenuItem("Hullbreach/Online/Add LAN controls to lobby prefab")]
+        public static void AddLanControlsMenu()
+        {
+            GameObject root = PrefabUtility.LoadPrefabContents(LobbyPrefabPath);
+            try
+            {
+                AddLanControls(root);
+                PrefabUtility.SaveAsPrefabAsset(root, LobbyPrefabPath);
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("LobbySceneBuilder: lobby prefab has the lan controls.");
+        }
+
+        static void AddLanControls(GameObject root)
+        {
+            Transform publicPanel = root.transform.Find("Background/MainPanel/BrowserRoot/PublicLobbies");
+            HullbreachLobbyView view = root.GetComponent<HullbreachLobbyView>();
+            if (publicPanel == null || view == null)
+                throw new System.InvalidOperationException("The lobby prefab is missing its public panel or view.");
+
+            Transform controls = publicPanel.Find("LanControls");
+            if (controls == null)
+            {
+                // the right column has room; adding more rows on the left would overflow.
+                GameObject group = AddUiObject(publicPanel, "LanControls");
+                controls = group.transform;
+                UnityEngine.UI.LayoutElement size = group.AddComponent<UnityEngine.UI.LayoutElement>();
+                size.minHeight = 184f;
+                size.preferredHeight = 184f;
+                UnityEngine.UI.VerticalLayoutGroup layout = group.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
+                layout.spacing = 8f;
+                layout.childControlHeight = true;
+                layout.childControlWidth = true;
+                layout.childForceExpandHeight = false;
+                layout.childForceExpandWidth = true;
+                AddSectionTitle(controls, "PLAY ON LAN");
+            }
+            controls.SetSiblingIndex(0);
+
+            UnityEngine.UI.Button host = controls.Find("LanHostButton")?.GetComponent<UnityEngine.UI.Button>()
+                ?? AddButton(controls, "LanHostButton", "HOST LAN", 44f);
+            TMP_InputField address = controls.Find("LanAddressInput")?.GetComponent<TMP_InputField>()
+                ?? AddInput(controls, "LanAddressInput", "Host IP, e.g. 127.0.0.1", false);
+            UnityEngine.UI.Button join = controls.Find("LanJoinButton")?.GetComponent<UnityEngine.UI.Button>()
+                ?? AddButton(controls, "LanJoinButton", "JOIN ADDRESS", 44f);
+            SerializedObject serialized = new SerializedObject(view);
+            Set(serialized, "lanHostButton", host);
+            Set(serialized, "lanAddressInput", address);
+            Set(serialized, "lanJoinButton", join);
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+        }
+
         public static void Build(bool force)
         {
+            MultiplayerRenderingSetup.EnsureRenderPipeline();
             Directory.CreateDirectory("Assets/Prefabs/UI");
             Directory.CreateDirectory("Assets/Prefabs/NetCode");
             Directory.CreateDirectory("Assets/Scenes");
@@ -128,13 +187,6 @@ namespace Hullbreach.Editor
             TMP_InputField joinPassword = AddInput(actions.transform, "JoinPasswordInput", "Password if required", true);
             Button joinButton = AddButton(actions.transform, "JoinCodeButton", "JOIN CODE", 44f);
 
-            // LAN play needs no Unity Services; see docs/netcode.md#lan-host-and-join-from-the-lobby.
-            AddSpacer(actions.transform, 10f);
-            AddSectionTitle(actions.transform, "PLAY ON LAN");
-            Button lanHostButton = AddButton(actions.transform, "LanHostButton", "HOST LAN", 44f);
-            TMP_InputField lanAddress = AddInput(actions.transform, "LanAddressInput", "Host IP, e.g. 192.168.1.23", false);
-            Button lanJoinButton = AddButton(actions.transform, "LanJoinButton", "JOIN ADDRESS", 44f);
-
             GameObject publicPanel = AddPanel(browser.transform, "PublicLobbies", Vector2.zero, new Color(0.09f, 0.13f, 0.2f, 1f));
             VerticalLayoutGroup publicLayout = publicPanel.AddComponent<VerticalLayoutGroup>();
             publicLayout.padding = new RectOffset(22, 22, 20, 20);
@@ -182,9 +234,6 @@ namespace Hullbreach.Editor
             Set(serialized, "joinCodeInput", joinCode);
             Set(serialized, "joinPasswordInput", joinPassword);
             Set(serialized, "joinCodeButton", joinButton);
-            Set(serialized, "lanAddressInput", lanAddress);
-            Set(serialized, "lanHostButton", lanHostButton);
-            Set(serialized, "lanJoinButton", lanJoinButton);
             Set(serialized, "refreshButton", refreshButton);
             Set(serialized, "publicLobbyList", listContent);
             Set(serialized, "publicLobbyRowTemplate", rowTemplate);
@@ -196,6 +245,7 @@ namespace Hullbreach.Editor
             Set(serialized, "leaveButton", leave);
             serialized.FindProperty("gameplaySceneName").stringValue = HullbreachLobbyService.DefaultGameScene;
             serialized.ApplyModifiedPropertiesWithoutUndo();
+            AddLanControls(canvasRoot);
 
             PrefabUtility.SaveAsPrefabAsset(canvasRoot, LobbyPrefabPath);
             Object.DestroyImmediate(canvasRoot);
@@ -310,7 +360,7 @@ namespace Hullbreach.Editor
             camera.orthographicSize = 16f;
 
             var presenter = new GameObject("NetworkShipPresenter");
-            presenter.AddComponent<HullbreachNetCodeView>();
+            MultiplayerRenderingSetup.AssignSprites(presenter.AddComponent<HullbreachNetCodeView>());
 
             var gameplay = new GameObject("NetworkGameplay");
             HullbreachNetworkGameplayController controller = gameplay.AddComponent<HullbreachNetworkGameplayController>();
