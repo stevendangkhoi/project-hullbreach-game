@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Hullbreach.Net;
+using Unity.Collections;
+using Unity.Entities;
+using Unity.NetCode;
 using Unity.Services.Authentication;
 using Unity.Services.Core;
 using Unity.Services.Multiplayer;
@@ -21,9 +24,12 @@ namespace Hullbreach.NetCode.Entities
         static HullbreachLobbyService s_Instance;
 
         Task _initializationTask;
+        Task _networkCleanupTask = Task.CompletedTask;
         ISession _session;
         IReadOnlyList<ISessionInfo> _publicSessions = Array.Empty<ISessionInfo>();
         bool _loadingGameScene;
+        bool _leavingSession;
+        bool _operationBusy;
         string _loggedStatus;
 
         public const string DefaultLobbyScene = "LobbyScene";
@@ -43,7 +49,7 @@ namespace Hullbreach.NetCode.Entities
         public event Action Changed;
 
         public bool IsReady { get; private set; }
-        public bool IsBusy { get; private set; }
+        public bool IsBusy => _operationBusy || !_networkCleanupTask.IsCompleted;
         public string Status { get; private set; } = "Starting Unity Services...";
         public string LastError { get; private set; }
         public ISession Session => _session;
@@ -142,7 +148,7 @@ namespace Hullbreach.NetCode.Entities
             }
             finally
             {
-                IsBusy = false;
+                _operationBusy = false;
                 NotifyChanged();
             }
         }
@@ -256,20 +262,35 @@ namespace Hullbreach.NetCode.Entities
 
         async Task LeaveCurrentSessionInternalAsync()
         {
+            await _networkCleanupTask;
             if (_session == null)
                 return;
 
             ISession leavingSession = _session;
+            _leavingSession = true;
+            try
+            {
+                // the allocation belongs to its host, so end the room when the host leaves.
+                if (leavingSession.IsHost)
+                    await leavingSession.AsHost().DeleteAsync();
+                else
+                    await leavingSession.LeaveAsync();
 
-            // A Relay allocation belongs to its host. Deleting the host's lobby avoids
-            // leaving a migrated lobby that points at a Relay allocation which no longer exists.
-            if (leavingSession.IsHost)
-                await leavingSession.AsHost().DeleteAsync();
-            else
-                await leavingSession.LeaveAsync();
-
-            if (_session == leavingSession)
-                DetachSession();
+                if (_session == leavingSession)
+                    DetachSession();
+            }
+            finally
+            {
+                try
+                {
+                    _networkCleanupTask = DisconnectNetworkAsync();
+                    await _networkCleanupTask;
+                }
+                finally
+                {
+                    _leavingSession = false;
+                }
+            }
         }
 
         void AttachSession(ISession session)
@@ -280,9 +301,11 @@ namespace Hullbreach.NetCode.Entities
                 return;
 
             _session.Changed += OnSessionChanged;
-            _session.Deleted += OnSessionEnded;
-            _session.RemovedFromSession += OnSessionEnded;
+            _session.Deleted += OnSessionDeleted;
+            _session.RemovedFromSession += OnSessionRemoved;
             NotifyChanged();
+            // the host may have started while this player's join request was finishing.
+            LoadGameSceneIfReady();
         }
 
         void DetachSession()
@@ -290,8 +313,8 @@ namespace Hullbreach.NetCode.Entities
             if (_session != null)
             {
                 _session.Changed -= OnSessionChanged;
-                _session.Deleted -= OnSessionEnded;
-                _session.RemovedFromSession -= OnSessionEnded;
+                _session.Deleted -= OnSessionDeleted;
+                _session.RemovedFromSession -= OnSessionRemoved;
             }
             _session = null;
             _loadingGameScene = false;
@@ -306,7 +329,7 @@ namespace Hullbreach.NetCode.Entities
 
         async void LoadGameSceneIfReady()
         {
-            if (_loadingGameScene || _session == null ||
+            if (_loadingGameScene || _leavingSession || _session == null ||
                 !_session.Properties.TryGetValue(GameSceneProperty, out SessionProperty property) ||
                 string.IsNullOrWhiteSpace(property?.Value) ||
                 SceneManager.GetActiveScene().name == property.Value)
@@ -325,17 +348,120 @@ namespace Hullbreach.NetCode.Entities
             }
         }
 
-        void OnSessionEnded()
+        void OnSessionDeleted() => OnSessionEnded(true);
+        void OnSessionRemoved() => OnSessionEnded(false);
+
+        async void OnSessionEnded(bool leaveDeletedSession)
         {
+            if (_leavingSession) return;
+            ISession endedSession = _session;
             DetachSession();
-            Status = "Session ended";
+            _networkCleanupTask = CleanupEndedSessionAsync(endedSession, leaveDeletedSession);
+            Status = "Session ended. Disconnecting...";
             NotifyChanged();
+            try
+            {
+                await _networkCleanupTask;
+                Status = "Session ended";
+            }
+            catch (Exception exception)
+            {
+                SetError(exception);
+                Debug.LogWarning($"Hullbreach online cleanup failed: {exception.Message}");
+            }
+            finally
+            {
+                NotifyChanged();
+            }
+        }
+
+        static async Task CleanupEndedSessionAsync(ISession session, bool leaveDeletedSession)
+        {
+            try
+            {
+                // deleted rooms leave sdk callbacks attached; kicked players already get sdk cleanup.
+                if (leaveDeletedSession && session != null)
+                    await session.LeaveAsync();
+            }
+            catch (SessionException exception) when (exception.Error == SessionError.SessionNotFound ||
+                exception.Error == SessionError.SessionDeleted || exception.Error == SessionError.NotInLobby)
+            {
+                // the host already removed the room, so there may be no membership left to delete.
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"Hullbreach online: SDK session cleanup failed: {exception.Message}");
+            }
+            finally
+            {
+                await DisconnectNetworkAsync();
+            }
+        }
+
+        static async Task DisconnectNetworkAsync()
+        {
+            await Task.WhenAll(
+                DisconnectWorldAsync(ClientServerBootstrap.ClientWorld),
+                DisconnectWorldAsync(ClientServerBootstrap.ServerWorld));
+            NetworkStreamReceiveSystem.DriverConstructor = new IPCAndSocketDriverConstructor();
+        }
+
+        // the sdk queues one client disconnect but does not stop the host's server driver.
+        // wait for netcode to remove connection cleanup components before replacing drivers.
+        static async Task DisconnectWorldAsync(Unity.Entities.World world)
+        {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while (world != null && world.IsCreated)
+            {
+                if (RequestDisconnects(world))
+                {
+                    ResetIdleDriver(world);
+                    world.GetExistingSystemManaged<HullbreachNetCodeClientSystem>()?.ResetMatch();
+                    world.GetExistingSystemManaged<HullbreachNetCodeServerSystem>()?.ResetMatch();
+                    return;
+                }
+                if (timer.Elapsed.TotalSeconds >= 10)
+                    throw new InvalidOperationException("The old connection did not close. Restart the game before joining another lobby.");
+                await Task.Delay(25);
+            }
+        }
+
+        static bool RequestDisconnects(Unity.Entities.World world)
+        {
+            var manager = world.EntityManager;
+            manager.CompleteAllTrackedJobs();
+            using var connects = manager.CreateEntityQuery(typeof(NetworkStreamRequestConnect));
+            using var listens = manager.CreateEntityQuery(typeof(NetworkStreamRequestListen));
+            manager.DestroyEntity(connects);
+            manager.DestroyEntity(listens);
+            using var connections = manager.CreateEntityQuery(typeof(NetworkStreamConnection));
+            using var entities = connections.ToEntityArray(Allocator.Temp);
+            foreach (Entity connection in entities)
+                if (!manager.HasComponent<NetworkStreamRequestDisconnect>(connection))
+                    manager.AddComponent<NetworkStreamRequestDisconnect>(connection);
+            return entities.Length == 0;
+        }
+
+        static void ResetIdleDriver(Unity.Entities.World world)
+        {
+            using var drivers = world.EntityManager.CreateEntityQuery(typeof(NetworkStreamDriver));
+            if (drivers.IsEmptyIgnoreFilter) return;
+            using var debug = world.EntityManager.CreateEntityQuery(typeof(NetDebug));
+            var constructor = new IPCAndSocketDriverConstructor();
+            var store = new NetworkDriverStore();
+            if (world.IsServer())
+                constructor.CreateServerDriver(world, ref store, debug.GetSingleton<NetDebug>());
+            else
+                constructor.CreateClientDriver(world, ref store, debug.GetSingleton<NetDebug>());
+            ref var driver = ref drivers.GetSingletonRW<NetworkStreamDriver>().ValueRW;
+            driver.ResetDriverStore(world.Unmanaged, ref store);
         }
 
         async Task RunOperationAsync(string busyStatus, Func<Task> operation)
         {
             if (IsBusy)
                 throw new InvalidOperationException("Another online operation is already in progress.");
+            await _networkCleanupTask;
 
             SetBusy(true, busyStatus);
             try
@@ -350,14 +476,14 @@ namespace Hullbreach.NetCode.Entities
             }
             finally
             {
-                IsBusy = false;
+                _operationBusy = false;
                 NotifyChanged();
             }
         }
 
         void SetBusy(bool busy, string status)
         {
-            IsBusy = busy;
+            _operationBusy = busy;
             Status = status;
             LastError = null;
             NotifyChanged();

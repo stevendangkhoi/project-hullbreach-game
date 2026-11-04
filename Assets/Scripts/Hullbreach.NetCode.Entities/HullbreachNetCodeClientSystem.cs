@@ -56,6 +56,7 @@ namespace Hullbreach.NetCode.Entities
             new Dictionary<uint, HullbreachNetCodeClient.ProjectileVisual>();
         uint _clientTick;
         string _lastMatchStatus;
+        int _loggedTransportId;
 
         protected override void OnCreate()
         {
@@ -63,6 +64,25 @@ namespace Hullbreach.NetCode.Entities
                 ComponentType.ReadOnly<HullbreachPayloadRpc>(),
                 ComponentType.ReadOnly<ReceiveRpcCommandRequest>());
             _ghostQuery = GetEntityQuery(ComponentType.ReadOnly<HullbreachGhostPose>());
+            ResetMatch();
+            RequireForUpdate<NetworkStreamDriver>();
+        }
+
+        // worlds survive returning to the lobby; each match needs a fresh replica and sequence history.
+        internal void ResetMatch()
+        {
+            EntityManager.CompleteAllTrackedJobs();
+            EntityManager.DestroyEntity(_payloadQuery);
+            EntityManager.DestroyEntity(_ghostQuery);
+            using var inputs = EntityManager.CreateEntityQuery(typeof(HullbreachInputRpc));
+            using var builds = EntityManager.CreateEntityQuery(typeof(HullbreachBuildRpc));
+            EntityManager.DestroyEntity(inputs);
+            EntityManager.DestroyEntity(builds);
+            _pending.Clear();
+            _projectiles.Clear();
+            _clientTick = 0;
+            _lastMatchStatus = null;
+            _loggedTransportId = 0;
             _replica = new ClientReplica();
             // Remote clients never see the server's feed, so the replicated match end feeds the results screen.
             if (!World.IsThinClient()) _replica.MatchFeed = Hullbreach.Platform.MatchEndFeed.Shared;
@@ -70,8 +90,8 @@ namespace Hullbreach.NetCode.Entities
             {
                 HullbreachNetCodeClient.Replica = _replica;
                 HullbreachNetCodeClient.Projectiles = _projectiles;
+                HullbreachNetCodeClient.LocalNetworkId = 0;
             }
-            RequireForUpdate<NetworkStreamDriver>();
         }
 
         protected override void OnDestroy()
@@ -94,6 +114,7 @@ namespace Hullbreach.NetCode.Entities
             if (!SystemAPI.TryGetSingleton<NetworkId>(out var networkId))
             {
                 if (!World.IsThinClient()) HullbreachNetCodeClient.LocalNetworkId = 0;
+                _loggedTransportId = 0;
                 return;
             }
 
@@ -113,6 +134,14 @@ namespace Hullbreach.NetCode.Entities
             }
 
             Entity connection = SystemAPI.GetSingletonEntity<NetworkId>();
+            if (_loggedTransportId != networkId.Value)
+            {
+                // log the actual transport once so online tests can distinguish relay from lan.
+                var stream = EntityManager.GetComponentData<NetworkStreamConnection>(connection);
+                bool relay = SystemAPI.GetSingleton<NetworkStreamDriver>().UseRelay(stream);
+                Debug.Log($"Hullbreach match: transport={(relay ? "Relay" : "direct/local")} for #{networkId.Value}");
+                _loggedTransportId = networkId.Value;
+            }
             if (!EntityManager.HasComponent<NetworkStreamInGame>(connection))
                 EntityManager.AddComponent<NetworkStreamInGame>(connection);
 

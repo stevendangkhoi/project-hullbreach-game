@@ -9,6 +9,10 @@ paths are retained.
 
 ## Before starting
 
+For internet play with guest accounts, skip to
+[Play with teammates over the internet](#play-with-teammates-over-the-internet).
+The platform API and server key below are only needed for account checks.
+
 1. Use Unity `6000.0.43f1`, the version pinned by the project. Activate a
    personal license in Unity Hub if needed. Do not upgrade the project.
 2. Start the platform API and create an account through the website.
@@ -108,19 +112,125 @@ The visible Windows test also passed: both accounts signed in, Host LAN
 and Join address connected two separate processes, both windows showed
 two ships with network IDs 1 and 2, and thrust, steering, and firing
 worked. Closing the host eventually showed the persistent disconnected
-message on the second player. Restart the game copies between matches.
+message on the second player. That earlier LAN check restarted the game copies
+between matches; the newer Relay check below also covers consecutive matches.
 
 The development client logged server-tick prediction corrections during
 the test, including while waiting for the closed host to time out. The
 exact timing/performance cause is not established. Local connection and
 account checks passed, but this is not a clean performance benchmark.
-Relay and play between separate computers were not tested in this run.
+That earlier run did not test Relay. See the online check below for the newer
+Relay results; play between separate computers still needs a teammate check.
+
+### Online verification on November 4, 2026
+
+Unity `6000.0.43f1` built the Windows Mono development client successfully.
+Five EditMode cleanup tests passed, covering listener reuse, connection cleanup,
+queued requests, fresh client replicas, and fresh server simulation state.
+The repository's Unity tree check and `git diff --check` also passed.
+
+Two visible game processes joined through the public room list and a private
+invite code. Both entered the match with two ships; movement and firing were
+checked manually. The joining player's transport log confirmed actual Relay
+traffic, while the host's own player used the local connection.
+
+The final repeatable check passed two consecutive private Relay matches in the
+same processes. The first match used IDs 1 and 2; the second used IDs 3 and 4.
+Both matches had exactly two replicated ships on both players. Leaving cleared
+the replicas, disconnected both sides, and allowed another room without a restart.
+The check pauses between rooms after an initial rapid retry hit Unity's request
+limit. Both final processes wrote their pass markers and exited successfully.
+
+These cloud tests used guest accounts on one Windows PC. They exercised the real
+Unity Lobby and Relay services, but they do not replace a teammate test on a
+different PC and network. Website account login was not re-tested during this
+online run. The earlier timing warnings remain a separate performance concern;
+the online checks establish connectivity and cleanup, not a performance target.
+
+## Play with teammates over the internet
+
+The game fork works with the existing website. The pilot website mockup and
+email-login changes are optional and do not need to be merged for online play.
+For an initial multiplayer check, use guest accounts so each teammate does not
+need a locally running platform API.
+
+1. Everyone should use the same build from `steven/login-mockup-netcode`, made
+   with Unity `6000.0.43f1`. Share the whole `Builds/windows-client` folder as a
+   ZIP, including the data folder and DLLs. Teammates extract it and run
+   `Project Hullbreach.exe`; they do not need the Unity Editor to play.
+2. Choose **Play offline** at the account form. Despite its current label, this
+   skips the Hullbreach account login; the online lobby still works through
+   Unity's anonymous player identity. It does not record a verified account's
+   match results. To test account features, everyone needs the same reachable
+   existing platform API; `127.0.0.1` on a friend's PC points to their own PC.
+3. The host selects **Private (join code only)**, then **Host with Relay**.
+   Wait for the waiting room and share its **Invite code** with teammates.
+4. Teammates enter that code under **Join by code** and select **Join code**.
+   If the host set a lobby password, enter it too. Wait until the room lists
+   all players, then the host selects **Start game**.
+5. Confirm different network IDs and a matching replicated-ship count. Press
+   Tab for Flight, W/S for thrust, A/D to steer, and Space to fire. Each player
+   should see the other ships move. Use **Leave** when finished. The host must
+   keep the game running; leaving ends the room, with no host migration.
+
+Use **Host with Relay** for this test. **Host LAN** and **Join address** are the
+direct-connection controls. Relay does not require router port forwarding.
+The project already links to the team's cloud project, `Orbital (1)` under
+`derrickdavison`. Keep that project ID so everyone sees the same lobbies.
+Teammates playing the built game do not need access to its cloud dashboard.
+
+For two instances on one Windows account, launch each with a different profile:
+
+```powershell
+.\play.cmd online --profile player1
+.\play.cmd online --profile player2
+```
+
+Run these in separate terminals. Profiles separate the Unity player identities,
+but the Hullbreach platform's saved login file is still shared. On separate
+computers the normal launcher is enough.
+
+For a short cloud-service check:
+
+```powershell
+.\play.cmd online --headless --seconds 60 --profile relaycheck
+```
+
+This signs in anonymously, creates a temporary private Relay lobby, and leaves
+it. It does not by itself prove two-player gameplay. Runtime logs report
+`Hullbreach match: transport=Relay` on a remote client after it enters a match;
+the host's own player normally reports `direct/local`.
+
+If creating or joining fails, read the error above the lobby controls and run
+`.\doctor.cmd --demo online`. A second local process needs a distinct profile.
+A join code belongs to the current room and expires when that room ends.
+If connection cleanup times out, close and reopen the game before retrying.
+If Unity reports `request_rate_limited`, wait a few seconds before trying again.
+
+## Repeatable Relay pair check
+
+Development builds include `RelayPairCheck`, which is inactive during normal play.
+Launch two processes with separate `-hullbreachProfile` values. Set
+`HULLBREACH_RELAY_CHECK_ROLE` to `host` for one and `client` for the other, and set
+`HULLBREACH_RELAY_CHECK_FOLDER` to the same new, empty local folder for both.
+This folder passes temporary room codes and completion markers between processes;
+it does not contain account credentials. Clear these environment variables in the
+launching terminal afterward so ordinary play does not start a test.
+
+The check hosts and joins two consecutive private rooms, starts each match,
+requires two replicated ships on both players, verifies Relay on the joining
+client, and checks that leaving clears all replicated ships before the next room.
+It pauses briefly between rounds to respect the cloud service's request limits.
+It exits each process with code 0 and writes `host-passed.txt` or
+`client-passed.txt` only after both rounds complete. A failure exits with code 1
+and writes a failure marker. Each wait has a 60-second limit. This needs live
+Unity services and internet access, and is separate from the EditMode tests.
 
 ## Team review and integration
 
 This fork extends the team's existing Netcode for Entities implementation.
 Review the account-session fixes, LAN lobby controls and transport setup,
-and saved rendering assets as the changes from this branch.
+saved rendering assets, and online session cleanup as the changes from this branch.
 
 The existing [draft PR](https://github.com/stevendangkhoi/project-hullbreach-game/pull/1)
 targets Steven's fork. Merging it would not update the team's repository.
@@ -132,10 +242,9 @@ To propose these changes to the team:
    **Compare across forks**. Set the base to `lognd/project-hullbreach-game`
    on `main`, and the head to `stevendangkhoi/project-hullbreach-game`
    on `steven/login-mockup-netcode`.
-3. Link the companion website/API PR from `steven/pilot-login` in
-   `stevendangkhoi/project-hullbreach-platform`. Review and merge the platform
-   changes first, then repeat the account and two-player checks above with both
-   branches before merging the game changes.
+3. Repeat the account and two-player checks above against the team's existing
+   platform API. The website mockup PR is independent and is not required for
+   this game PR. Keep username sign-in when using the unchanged platform API.
 4. Coordinate the lobby prefab and multiplayer scene edits with anyone working
    on those assets. Keep Unity assets, their `.meta` files, and project settings
    together. Keep the editor at `6000.0.43f1`.
@@ -145,5 +254,5 @@ To propose these changes to the team:
 
 Use the same platform API for the website and game. Configure its server key
 only for the hosting process, and keep test credentials, logs, and builds local.
-Include the timing warnings and untested Relay/separate-computer cases in the PR
+Include the timing warnings and the remaining separate-computer check in the PR
 so reviewers know the limits of the current checks.

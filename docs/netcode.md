@@ -175,6 +175,20 @@ scene, show two ships, and report `Replicated ships: 2`. A password is optional
 for public and private lobbies, but when present must be 8-64 characters
 because that is the Unity Lobby service contract.
 
+Leaving an online room disconnects both the local client and any hosted peers.
+The lobby waits for Netcode to remove the connection entities before replacing
+the old drivers with idle ones. This also stops the host's Relay listener, so a
+later host or join operation can reuse the running game. If cleanup cannot finish
+within ten seconds, the error asks the player to restart instead of resetting a
+driver that still has live connections. A deleted room uses the same local cleanup.
+Cleanup also clears the previous match's ships, projectiles, queued messages, and
+client sequence history. Rehosting starts with a fresh simulation and replica
+while preserving the scene's baked ghost prefabs.
+
+When joining finishes, the game checks the room's current scene property as well
+as later updates. This covers a host starting the match while another player's
+join request is still completing.
+
 ## The governing rule: send causes, not effects
 
 Integer flood fill (`Hullbreach.Core.Topology.Connectivity`) is

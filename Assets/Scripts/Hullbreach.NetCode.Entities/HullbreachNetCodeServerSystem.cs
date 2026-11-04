@@ -29,12 +29,6 @@ namespace Hullbreach.NetCode.Entities
 
         protected override void OnCreate()
         {
-            _outbox = new ServerOutbox();
-            _simulation = new ServerSimulation(_outbox)
-            {
-                TickRate = HullbreachNetCodeConstants.SimulationTickRate,
-                EmitPoseMessages = false,
-            };
             _connectionQuery = GetEntityQuery(
                 ComponentType.ReadOnly<NetworkId>(),
                 ComponentType.ReadOnly<NetworkStreamConnection>());
@@ -44,7 +38,32 @@ namespace Hullbreach.NetCode.Entities
             _buildQuery = GetEntityQuery(
                 ComponentType.ReadOnly<HullbreachBuildRpc>(),
                 ComponentType.ReadOnly<ReceiveRpcCommandRequest>());
+            ResetMatch();
             RequireForUpdate<NetworkStreamDriver>();
+        }
+
+        // reset only after all connections leave, so a new room cannot inherit old ships or shots.
+        internal void ResetMatch()
+        {
+            EntityManager.CompleteAllTrackedJobs();
+            using var ghosts = EntityManager.CreateEntityQuery(typeof(HullbreachGhostPose));
+            using var payloads = EntityManager.CreateEntityQuery(typeof(HullbreachPayloadRpc));
+            EntityManager.DestroyEntity(ghosts);
+            EntityManager.DestroyEntity(payloads);
+            EntityManager.DestroyEntity(_inputQuery);
+            EntityManager.DestroyEntity(_buildQuery);
+            _joinedPeers.Clear();
+            _connections.Clear();
+            _shipGhosts.Clear();
+            _projectileGhosts.Clear();
+            _nextMessageId = 1;
+            _arenaConfigured = false;
+            _outbox = new ServerOutbox();
+            _simulation = new ServerSimulation(_outbox)
+            {
+                TickRate = HullbreachNetCodeConstants.SimulationTickRate,
+                EmitPoseMessages = false,
+            };
         }
 
         protected override void OnUpdate()
